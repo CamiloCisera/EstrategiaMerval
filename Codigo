@@ -1,0 +1,97 @@
+import pandas as pd
+import datetime as dt
+import yfinance as yf
+import numpy as np
+import matplotlib.pyplot as plt
+plt.style.use('seaborn-white')
+plt.rcParams['font.size'] = 10
+plt.rcParams['figure.figsize'] = [12,6]
+plt.rcParams["font.weight"] = "bold"
+plt.rcParams["axes.labelweight"] = "bold"
+plt.rcParams["font.size"] = 15
+
+#==============================================================================
+#                     BACKTESTING
+#==============================================================================
+
+merv = pd.read_excel("/Users/ciser/Desktop/merval_actualizado.xlsx",
+                     index_col=0)
+merv = merv.drop(["Merval", "contado con liqui"], axis=1)
+
+# Calculo de promedio acumulado
+merv["cum_sum"] = merv["Merval_dlr"].cumsum()
+cum_mean = []
+for i in range(len(merv)):
+    if i<=378:
+        cum_mean.append(np.nan)
+    if i>378:
+     cum_mean.append(merv["cum_sum"][i]/(1+i))
+merv["cum_mean"] = cum_mean  
+
+# BACKTEST & GRAFICO
+posicion = "neutra"
+retorno = []
+valores_comprado = [] # para graficar
+valor_compra = 330
+
+for i in range(len(merv)):
+    if posicion == "neutra":
+        retorno.append(0)
+        valores_comprado.append(np.nan)
+        if merv["Merval_dlr"][i] <= valor_compra:
+            posicion="long"
+    elif posicion == "long":
+        valores_comprado.append(merv["Merval_dlr"][i])
+        if merv["Merval_dlr"][i] >= merv["cum_mean"][i]:
+            posicion = "neutra"
+            retorno.append((merv["cum_mean"][i]/merv["Merval_dlr"][i])-1)
+        else:
+            retorno.append((merv["Merval_dlr"][i]/merv["Merval_dlr"][i-1])-1)
+merv["retorno"] = retorno
+merv["comprado"] = valores_comprado
+merv["retorno_acum"] = (1+merv["retorno"]).cumprod()-1
+
+#tiempo con posicion
+merv["comprado"].count()/len(merv)
+1-(merv["comprado"].isna().sum()/len(merv))
+
+# GRAFICO
+plt.title("Estrategia de regresión a la media", fontsize=20, c="k")
+plt.ylabel("U$S", c="k", fontsize=15)
+plt.xlabel("Fecha", c="k", fontsize=15)
+plt.plot(merv["Merval_dlr"], c="k", lw=1.4, label="Merval en U$S")
+plt.plot(merv["cum_mean"], c="orange", lw=1.4, ls="--",
+         label="Promedio acumulado")
+plt.plot(merv["comprado"], c="b",
+         label="Posicion comprada", lw=1.4)
+#plt.axhline(330, xmin=0.12, xmax=.955, lw=0.9, ls="--", c="r")
+plt.legend()
+plt.show()
+
+#==============================================================================
+#                   Metricas de la estrategia
+#==============================================================================
+
+#   CAGR (retorno anual en promedio geometrico)
+tiempo = merv.index[-1]-merv.index[1]
+tiempo = tiempo.days/365
+CAGR = ((1+merv["retorno_acum"][-1])**(1/tiempo))-1
+
+#   Volatilidad anualizada
+volatilidad_anual = merv["retorno"].std() * np.sqrt(252)
+
+#   Sharpe
+rf = 0.00
+sharpe = (CAGR - rf)/volatilidad_anual
+
+# Perdida maxima
+def perdida_max(DF):
+    df = DF.copy()
+    df["retorno_acum_max"] = (1+df["retorno_acum"]).cummax()
+    df["perdida"] = ((1+df["retorno_acum"]) - df["retorno_acum_max"])/df["retorno_acum_max"]
+    mayor_caida = df["perdida"].min()
+    fecha = df["perdida"].idxmin()
+    print(f"caida acumulada de {round(mayor_caida*100,2)}% al {fecha}")
+    return mayor_caida
+
+perdida_max(merv)
